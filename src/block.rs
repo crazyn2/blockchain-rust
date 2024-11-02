@@ -3,10 +3,9 @@
 use super::*;
 use crate::transaction::Transaction;
 use bincode::serialize;
-use crypto::digest::Digest;
-use crypto::sha2::Sha256;
 use merkle_cbt::merkle_tree::Merge;
 use merkle_cbt::merkle_tree::CBMT;
+use ring::digest::{Context, SHA256};
 use serde::{Deserialize, Serialize};
 use std::time::SystemTime;
 
@@ -73,9 +72,9 @@ impl Block {
             self.nonce += 1;
         }
         let data = self.prepare_hash_data()?;
-        let mut hasher = Sha256::new();
-        hasher.input(&data[..]);
-        self.hash = hasher.result_str();
+        let mut hasher = Context::new(&SHA256);
+        hasher.update(&data[..]);
+        self.hash = hex::encode(hasher.finish().as_ref());
         Ok(())
     }
 
@@ -105,11 +104,16 @@ impl Block {
     /// Validate validates block's PoW
     fn validate(&self) -> Result<bool> {
         let data = self.prepare_hash_data()?;
-        let mut hasher = Sha256::new();
-        hasher.input(&data[..]);
-        let mut vec1: Vec<u8> = Vec::new();
-        vec1.resize(TARGET_HEXS, '0' as u8);
-        Ok(&hasher.result_str()[0..TARGET_HEXS] == String::from_utf8(vec1)?)
+        let mut hasher = Context::new(&SHA256);
+        hasher.update(&data[..]);
+        let hash_result = hasher.finish();
+        let hash_hex = hex::encode(&hash_result.as_ref()[..TARGET_HEXS]); // 使用 hex crate 转换为十六进制字符串
+
+        // 创建一个包含 TARGET_HEXS 个 '0' 的字符串进行比较
+        let target_str = "0".repeat(TARGET_HEXS);
+
+        // 比较哈希值与目标字符串是否相等
+        Ok(&hash_hex == &target_str)
     }
 }
 
@@ -118,12 +122,11 @@ struct MergeVu8 {}
 impl Merge for MergeVu8 {
     type Item = Vec<u8>;
     fn merge(left: &Self::Item, right: &Self::Item) -> Self::Item {
-        let mut hasher = Sha256::new();
+        let mut hasher = Context::new(&SHA256);
         let mut data: Vec<u8> = left.clone();
         data.append(&mut right.clone());
-        hasher.input(&data);
-        let mut re: [u8; 32] = [0; 32];
-        hasher.result(&mut re);
-        re.to_vec()
+        hasher.update(&data);
+        let re = hasher.finish();
+        re.as_ref().to_vec()
     }
 }

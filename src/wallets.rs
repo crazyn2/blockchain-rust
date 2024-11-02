@@ -3,11 +3,16 @@
 use super::*;
 use bincode::{deserialize, serialize};
 use bitcoincash_addr::*;
-use crypto::digest::Digest;
-use crypto::ed25519;
-use crypto::ripemd160::Ripemd160;
-use crypto::sha2::Sha256;
-use rand::Rng;
+// use ed25519_dalek::{Keypair, Signature, Signer, Verifier};
+// use untrusted::Input;
+// use ring::signature::{Ed25519KeyPair, Signature, KeyPair, UnparsedPublicKey};
+use ring::signature::KeyPair;
+use ring::signature::{self, Ed25519KeyPair};
+// use rand::Rng;
+use ring::digest;
+use ring::rand;
+use ripemd::Ripemd160;
+use ripemd::Digest;
 use serde::{Deserialize, Serialize};
 use sled;
 use std::collections::HashMap;
@@ -21,12 +26,13 @@ pub struct Wallet {
 impl Wallet {
     /// NewWallet creates and returns a Wallet
     fn new() -> Self {
-        let mut key: [u8; 32] = [0; 32];
-        let mut rand = rand::OsRng::new().unwrap();
-        rand.fill_bytes(&mut key);
-        let (secret_key, public_key) = ed25519::keypair(&key);
-        let secret_key = secret_key.to_vec();
-        let public_key = public_key.to_vec();
+        // let mut key: [u8; 32] = [0; 32];
+        let rng = rand::SystemRandom::new();
+        let pkcs8_bytes = signature::Ed25519KeyPair::generate_pkcs8(&rng).unwrap();
+        let key_pair = Ed25519KeyPair::from_pkcs8(pkcs8_bytes.as_ref()).unwrap();
+
+        let secret_key = pkcs8_bytes.as_ref().to_vec();
+        let public_key = key_pair.public_key().as_ref().to_vec();
         Wallet {
             secret_key,
             public_key,
@@ -49,13 +55,12 @@ impl Wallet {
 
 /// HashPubKey hashes public key
 pub fn hash_pub_key(pubKey: &mut Vec<u8>) {
-    let mut hasher1 = Sha256::new();
-    hasher1.input(pubKey);
-    hasher1.result(pubKey);
-    let mut hasher2 = Ripemd160::new();
-    hasher2.input(pubKey);
-    pubKey.resize(20, 0);
-    hasher2.result(pubKey);
+    let sha256_hash = digest::digest(&digest::SHA256, pubKey);
+    *pubKey = sha256_hash.as_ref().to_vec();
+    let mut hasher2: Ripemd160 = Ripemd160::new();
+    // pubKey.resize(20, 0);
+    hasher2.update(&pubKey);
+    *pubKey = hasher2.finalize().to_vec();
 }
 
 pub struct Wallets {
@@ -159,11 +164,17 @@ mod test {
     #[test]
     fn test_signature() {
         let w = Wallet::new();
-        let signature = ed25519::signature("test".as_bytes(), &w.secret_key);
-        assert!(ed25519::verify(
-            "test".as_bytes(),
-            &w.public_key,
-            &signature
-        ));
+        let key_pair = Ed25519KeyPair::from_pkcs8(&w.secret_key).unwrap();
+        let sig = key_pair.sign("test".as_bytes());
+        // let signature = key_pair.sign("test".as_bytes());
+        // assert!(ed25519::verify(
+        //     "test".as_bytes(),
+        //     &w.public_key,
+        //     &signature
+        // ));
+        let peer_public_key = signature::UnparsedPublicKey::new(&signature::ED25519, &w.public_key);
+        assert!(peer_public_key
+            .verify("test".as_bytes(), sig.as_ref())
+            .is_ok());
     }
 }

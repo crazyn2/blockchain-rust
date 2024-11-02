@@ -5,11 +5,12 @@ use crate::utxoset::*;
 use crate::wallets::*;
 use bincode::serialize;
 use bitcoincash_addr::Address;
-use crypto::digest::Digest;
-use crypto::ed25519;
-use crypto::sha2::Sha256;
 use failure::format_err;
+use hex;
 use rand::Rng;
+use ring::digest::{Context, SHA256};
+use ring::signature::UnparsedPublicKey;
+use ring::signature::{Ed25519KeyPair, ED25519};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -150,11 +151,11 @@ impl Transaction {
             tx_copy.id = tx_copy.hash()?;
             tx_copy.vin[in_id].pub_key = Vec::new();
 
-            if !ed25519::verify(
-                &tx_copy.id.as_bytes(),
-                &self.vin[in_id].pub_key,
-                &self.vin[in_id].signature,
-            ) {
+            let public_key = UnparsedPublicKey::new(&ED25519, &self.vin[in_id].pub_key);
+            if public_key
+                .verify(tx_copy.id.as_bytes(), &self.vin[in_id].signature)
+                .is_err()
+            {
                 return Ok(false);
             }
         }
@@ -177,7 +178,7 @@ impl Transaction {
                 return Err(format_err!("ERROR: Previous transaction is not correct"));
             }
         }
-
+        let key_pair = Ed25519KeyPair::from_pkcs8(private_key).unwrap();
         let mut tx_copy = self.trim_copy();
 
         for in_id in 0..tx_copy.vin.len() {
@@ -188,8 +189,8 @@ impl Transaction {
                 .clone();
             tx_copy.id = tx_copy.hash()?;
             tx_copy.vin[in_id].pub_key = Vec::new();
-            let signature = ed25519::signature(tx_copy.id.as_bytes(), private_key);
-            self.vin[in_id].signature = signature.to_vec();
+            let signature = key_pair.sign(tx_copy.id.as_bytes());
+            self.vin[in_id].signature = signature.as_ref().to_vec();
         }
 
         Ok(())
@@ -200,9 +201,10 @@ impl Transaction {
         let mut copy = self.clone();
         copy.id = String::new();
         let data = serialize(&copy)?;
-        let mut hasher = Sha256::new();
-        hasher.input(&data[..]);
-        Ok(hasher.result_str())
+        let mut hasher = Context::new(&SHA256);
+        hasher.update(&data);
+        let hash_str = hex::encode(hasher.finish().as_ref());
+        Ok(hash_str)
     }
 
     /// TrimmedCopy creates a trimmed copy of Transaction to be used in signing
@@ -272,8 +274,13 @@ mod test {
         let data = String::from("test");
         let tx = Transaction::new_coinbase(wa1, data).unwrap();
         assert!(tx.is_coinbase());
+        let key_pair = Ed25519KeyPair::from_pkcs8(&w.secret_key).unwrap();
+        let signature = key_pair.sign(tx.id.as_bytes());
 
-        let signature = ed25519::signature(tx.id.as_bytes(), &w.secret_key);
-        assert!(ed25519::verify(tx.id.as_bytes(), &w.public_key, &signature));
+        // 验证签名
+        let public_key = UnparsedPublicKey::new(&ED25519, &w.public_key);
+        assert!(public_key
+            .verify(tx.id.as_bytes(), signature.as_ref())
+            .is_ok());
     }
 }
