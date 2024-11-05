@@ -70,6 +70,7 @@ impl Block {
         info!("Mining the block");
         while !self.validate()? {
             self.nonce += 1;
+            // info!("nonce changed: {}", self.nonce);
         }
         let data = self.prepare_hash_data()?;
         let mut hasher = Context::new(&SHA256);
@@ -107,8 +108,11 @@ impl Block {
         let mut hasher = Context::new(&SHA256);
         hasher.update(&data[..]);
         let hash_result = hasher.finish();
-        let hash_hex = hex::encode(&hash_result.as_ref()[..TARGET_HEXS]); // 使用 hex crate 转换为十六进制字符串
-
+        let hash = hex::encode(&hash_result.as_ref());
+        let hash_hex = &hash[..TARGET_HEXS];
+        // info!("hash_hex: {:?}", &hash_result.as_ref());
+        // info!("hash_hex: {:?}", &hash_result.as_ref()[..TARGET_HEXS]);
+        // info!("hash_hex: {:?}", hex::encode(&hash_result.as_ref()[..TARGET_HEXS]));
         // 创建一个包含 TARGET_HEXS 个 '0' 的字符串进行比较
         let target_str = "0".repeat(TARGET_HEXS);
 

@@ -46,6 +46,7 @@ impl Blockchain {
     /// CreateBlockchain creates a new blockchain DB
     pub fn create_blockchain(address: String) -> Result<Blockchain> {
         info!("Creating new blockchain");
+        println!("Creating new blockchain");
 
         std::fs::remove_dir_all("data/blocks").ok();
         let db = sled::open("data/blocks")?;
